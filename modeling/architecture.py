@@ -1,10 +1,13 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm
 
 from modeling.base import BaseNetwork
-from modules.blocks import ResBlock, ConvBlock, PCBlock
+from modules.blocks import ResBlock, ConvBlock, PCBlock, Attention
 
 
 class MPN(BaseNetwork):
@@ -13,13 +16,19 @@ class MPN(BaseNetwork):
         assert base_n_channels >= 4, "Base num channels should be at least 4"
         assert neck_n_channels >= 16, "Neck num channels should be at least 16"
         self.rb1 = ResBlock(channels_in=3, channels_out=base_n_channels, kernel_size=5, stride=2, padding=2, dilation=1)
+        self.att1 = Attention(base_n_channels)  # 加 attention
+
         self.rb2 = ResBlock(channels_in=base_n_channels, channels_out=base_n_channels * 2, kernel_size=3, stride=2)
+        self.att2 = Attention(base_n_channels * 2)
+
         self.rb3 = ResBlock(channels_in=base_n_channels * 2, channels_out=base_n_channels * 2, kernel_size=3, stride=1, padding=2, dilation=2)
         self.rb4 = ResBlock(channels_in=base_n_channels * 2, channels_out=neck_n_channels, kernel_size=3, stride=1, padding=4, dilation=4)
 
         self.upsample = nn.UpsamplingNearest2d(scale_factor=2.0)
 
         self.rb5 = ResBlock(channels_in=base_n_channels * 2, channels_out=base_n_channels * 2, kernel_size=3, stride=1)
+        self.att3 = Attention(base_n_channels * 2)
+
         self.rb6 = ResBlock(channels_in=base_n_channels * 2, channels_out=base_n_channels, kernel_size=3, stride=1)
         self.rb7 = ResBlock(channels_in=base_n_channels, channels_out=base_n_channels // 2, kernel_size=3, stride=1)
 
@@ -30,12 +39,17 @@ class MPN(BaseNetwork):
 
     def forward(self, x):
         out = self.rb1(x)
+        out = self.att1(out)
+
         out = self.rb2(out)
+        out = self.att2(out)
+
         out = self.rb3(out)
         neck = self.rb4(out)
-        # bottleneck here
 
         out = self.rb5(neck)
+        out = self.att3(out)
+
         out = self.upsample(out)
         out = self.rb6(out)
         out = self.upsample(out)
